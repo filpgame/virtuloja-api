@@ -3,7 +3,10 @@ package controllers
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
+	"strconv"
+	"time"
 
 	"github.com/filpgame/virtuloja-api/models"
 	"github.com/julienschmidt/httprouter"
@@ -58,8 +61,8 @@ func NewCartController(s *mgo.Session) *CartController {
 // 	fmt.Fprintf(w, "%s", uj)
 // }
 
-// // GetProductByGlobalID retrieves an individual product resource by global id
-// func (pc CartController) GetProductByGlobalID(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
+// GetCartByCustomerID retrieves an individual product resource by global id
+// func (pc CartController) GetCartByCustomerID(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
 // 	// Grab id
 // 	id, err := strconv.Atoi(p.ByName("id"))
 // 	if err != nil {
@@ -99,16 +102,82 @@ func NewCartController(s *mgo.Session) *CartController {
 func (cc CartController) CreateCart(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
 
 	// Stub a product to be populated from the body
-	c := models.Product{}
+	cAux := models.Cart{}
+	c := models.Cart{}
 
 	// Populate the product data
-	json.NewDecoder(r.Body).Decode(&c)
+	json.NewDecoder(r.Body).Decode(&cAux)
+	c.CustomerID = cAux.CustomerID
+	c.TimeIni = time.Now()
 
 	// Add an Id
 	c.ID = bson.NewObjectId()
 
 	// Write the product to mongo
 	cc.session.DB("virtuloja-api").C("carts").Insert(c)
+
+	// Marshal provided interface into JSON structure
+	prj, _ := json.Marshal(c)
+
+	// Write content-type, statuscode, payload
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+	fmt.Fprintf(w, "%s", prj)
+}
+
+// AddProduct creates a new user resource
+func (cc CartController) AddProduct(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
+
+	// Grab id
+	customerID, err := strconv.Atoi(p.ByName("customerId"))
+
+	// Stub a product to be populated from the body
+	i := models.Item{}
+
+	// Populate the product data
+	json.NewDecoder(r.Body).Decode(&i)
+
+	var c models.Cart
+
+	err = cc.session.DB("virtuloja-api").C("carts").Find(bson.M{"customerid": customerID}).One(&c)
+	if err != nil {
+		log.Println(err.Error())
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Adicionar novos itens na lista
+	repeated := false
+	for k := 0; k < len(c.Items); k++ {
+
+		if i.Product == c.Items[k].Product {
+
+			c.Items[k].Quantity += i.Quantity
+			repeated = true
+			break
+		}
+	}
+
+	if !repeated {
+
+		c.Items = append(c.Items, i)
+	}
+
+	change := mgo.Change{
+		Update:    bson.M{"$set": bson.M{"items": c.Items}},
+		Upsert:    false,
+		Remove:    false,
+		ReturnNew: true,
+	}
+	info, err := cc.session.DB("virtuloja-api").C("carts").Find(bson.M{"customerid": c.CustomerID}).Apply(change, &c)
+	fmt.Println(info)
+	fmt.Println(c.CustomerID)
+
+	// Add an Id
+	c.ID = bson.NewObjectId()
+
+	// Write the product to mongo
+	//cc.session.DB("virtuloja-api").C("carts").Insert(c)
 
 	// Marshal provided interface into JSON structure
 	prj, _ := json.Marshal(c)

@@ -37,8 +37,11 @@ func main() {
 	// Create a new product
 	r.POST("/cart", cc.CreateCart)
 
+	// Create a new product
+	r.POST("/cart/:customerId/addProduct", cc.AddProduct)
+
 	// Fire up the server
-	http.ListenAndServe(":8000", r)
+	http.ListenAndServe(":8001", r)
 }
 
 // getSession creates a new mongo session and panics if connection error occurs
