@@ -3,10 +3,12 @@ package controllers
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
+	"strconv"
 
+	"github.com/filpgame/virtuloja-api/models"
 	"github.com/julienschmidt/httprouter"
-	"github.com/swhite24/go-rest-tutorial/models"
 	"gopkg.in/mgo.v2"
 	"gopkg.in/mgo.v2/bson"
 )
@@ -33,14 +35,16 @@ func NewProductController(s *mgo.Session) *ProductController {
 	return &ProductController{s}
 }
 
-// GetProduct retrieves an individual user resource
+// GetProduct retrieves an individual product resource by ID
 func (pc ProductController) GetProduct(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
 	// Grab id
 	id := p.ByName("id")
 
 	// Verify id is ObjectId, otherwise bail
 	if !bson.IsObjectIdHex(id) {
-		w.WriteHeader(404)
+		msg := "Invalid ObjectId"
+		log.Println(msg)
+		http.Error(w, msg, http.StatusInternalServerError)
 		return
 	}
 
@@ -48,16 +52,54 @@ func (pc ProductController) GetProduct(w http.ResponseWriter, r *http.Request, p
 	oid := bson.ObjectIdHex(id)
 
 	// Stub product
-	u := models.User{}
+	pr := models.Product{}
 
 	// Fetch product
-	if err := pc.session.DB("virtuloja-api").C("products").FindId(oid).One(&u); err != nil {
-		w.WriteHeader(404)
+	if err := pc.session.DB("virtuloja-api").C("products").FindId(oid).One(&pr); err != nil {
+		log.Println(err.Error())
+		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
 	// Marshal provided interface into JSON structure
-	uj, _ := json.Marshal(u)
+	uj, _ := json.Marshal(pr)
+
+	// Write content-type, statuscode, payload
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	fmt.Fprintf(w, "%s", uj)
+}
+
+// GetProductByGlobalID retrieves an individual product resource by global id
+func (pc ProductController) GetProductByGlobalID(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
+	// Grab id
+	id, err := strconv.Atoi(p.ByName("id"))
+	if err != nil {
+		msg := "Invalid id"
+		log.Println(msg)
+		http.Error(w, msg, http.StatusInternalServerError)
+		return
+	}
+
+	// Query All
+	var results []models.Product
+	err = pc.session.DB("virtuloja-api").C("products").Find(bson.M{"globalid": id}).Sort("-timestamp").All(&results)
+
+	if err != nil {
+		log.Println(err.Error())
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	if len(results) == 0 {
+		msg := "No results found"
+		log.Println(msg)
+		http.Error(w, msg, http.StatusInternalServerError)
+		return
+	}
+
+	// Marshal provided interface into JSON structure
+	uj, _ := json.Marshal(results)
 
 	// Write content-type, statuscode, payload
 	w.Header().Set("Content-Type", "application/json")
@@ -69,7 +111,7 @@ func (pc ProductController) GetProduct(w http.ResponseWriter, r *http.Request, p
 func (pc ProductController) CreateProduct(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
 
 	// Stub a product to be populated from the body
-	pr := Product{}
+	pr := models.Product{}
 
 	// Populate the product data
 	json.NewDecoder(r.Body).Decode(&pr)
