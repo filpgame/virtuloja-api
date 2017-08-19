@@ -31,8 +31,14 @@ func main() {
 	// Remove an existing product
 	// r.DELETE("/product/:id", uc.RemoveUser)
 
+	// Get a UserController instance
+	cc := controllers.NewCartController(getSession())
+
+	// Create a new product
+	r.POST("/cart", cc.CreateCart)
+
 	// Fire up the server
-	http.ListenAndServe("localhost:3000", r)
+	http.ListenAndServe(":8000", r)
 }
 
 // getSession creates a new mongo session and panics if connection error occurs
