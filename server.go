@@ -28,6 +28,12 @@ func main() {
 	// Create a new product
 	r.POST("/product", pc.CreateProduct)
 
+	// Get a UserController instance
+	sc := controllers.NewStockController(getSession())
+
+	// Create a new product
+	r.POST("/stock", sc.RegisterStockItem)
+
 	// Remove an existing product
 	// r.DELETE("/product/:id", uc.RemoveUser)
 

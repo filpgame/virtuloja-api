@@ -9,9 +9,10 @@ import (
 type (
 	// Item represents the structure of our resource
 	Item struct {
-		Value    float32
-		GlobalID int32
-		Quantity int16
+		Value        float32
+		GlobalID     int32
+		Quantity     int16
+		MinimumStock int16
 	}
 )
 
