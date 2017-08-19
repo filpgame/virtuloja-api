@@ -26,78 +26,6 @@ func NewCartController(s *mgo.Session) *CartController {
 	return &CartController{s}
 }
 
-// // GetCart retrieves an individual cartresource by ID
-// func (pc CartController) GetCart(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
-// 	// Grab id
-// 	id := p.ByName("id")
-
-// 	// Verify id is ObjectId, otherwise bail
-// 	if !bson.IsObjectIdHex(id) {
-// 		msg := "Invalid ObjectId"
-// 		log.Println(msg)
-// 		http.Error(w, msg, http.StatusInternalServerError)
-// 		return
-// 	}
-
-// 	// Grab id
-// 	oid := bson.ObjectIdHex(id)
-
-// 	// Stub product
-// 	pr := models.Product{}
-
-// 	// Fetch product
-// 	if err := pc.session.DB("virtuloja-api").C("products").FindId(oid).One(&pr); err != nil {
-// 		log.Println(err.Error())
-// 		http.Error(w, err.Error(), http.StatusInternalServerError)
-// 		return
-// 	}
-
-// 	// Marshal provided interface into JSON structure
-// 	uj, _ := json.Marshal(pr)
-
-// 	// Write content-type, statuscode, payload
-// 	w.Header().Set("Content-Type", "application/json")
-// 	w.WriteHeader(200)
-// 	fmt.Fprintf(w, "%s", uj)
-// }
-
-// GetCartByCustomerID retrieves an individual product resource by global id
-// func (pc CartController) GetCartByCustomerID(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
-// 	// Grab id
-// 	id, err := strconv.Atoi(p.ByName("id"))
-// 	if err != nil {
-// 		msg := "Invalid id"
-// 		log.Println(msg)
-// 		http.Error(w, msg, http.StatusInternalServerError)
-// 		return
-// 	}
-
-// 	// Query All
-// 	var results []models.Product
-// 	err = pc.session.DB("virtuloja-api").C("products").Find(bson.M{"globalid": id}).Sort("-timestamp").All(&results)
-
-// 	if err != nil {
-// 		log.Println(err.Error())
-// 		http.Error(w, err.Error(), http.StatusInternalServerError)
-// 		return
-// 	}
-
-// 	if len(results) == 0 {
-// 		msg := "No results found"
-// 		log.Println(msg)
-// 		http.Error(w, msg, http.StatusInternalServerError)
-// 		return
-// 	}
-
-// 	// Marshal provided interface into JSON structure
-// 	uj, _ := json.Marshal(results)
-
-// 	// Write content-type, statuscode, payload
-// 	w.Header().Set("Content-Type", "application/json")
-// 	w.WriteHeader(200)
-// 	fmt.Fprintf(w, "%s", uj)
-// }
-
 // CreateCart creates a new user resource
 func (cc CartController) CreateCart(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
 
@@ -108,7 +36,7 @@ func (cc CartController) CreateCart(w http.ResponseWriter, r *http.Request, p ht
 	// Populate the product data
 	json.NewDecoder(r.Body).Decode(&cAux)
 	c.CustomerID = cAux.CustomerID
-	c.TimeIni = time.Now()
+	c.TimeStart = time.Now()
 
 	// Add an Id
 	c.ID = bson.NewObjectId()
@@ -130,6 +58,11 @@ func (cc CartController) AddProduct(w http.ResponseWriter, r *http.Request, p ht
 
 	// Grab id
 	customerID, err := strconv.Atoi(p.ByName("customerId"))
+	if err != nil {
+		log.Println(err.Error())
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
 
 	// Stub a product to be populated from the body
 	i := models.Item{}
@@ -146,11 +79,18 @@ func (cc CartController) AddProduct(w http.ResponseWriter, r *http.Request, p ht
 		return
 	}
 
+	if i.Value == 0 {
+
+		var pp models.Product
+		err = cc.session.DB("virtuloja-api").C("products").Find(bson.M{"globalid": i.GlobalID}).One(&pp)
+		i.Value = pp.Value
+	}
+
 	// Adicionar novos itens na lista
 	repeated := false
 	for k := 0; k < len(c.Items); k++ {
 
-		if i.Product == c.Items[k].Product {
+		if i.GlobalID == c.Items[k].GlobalID {
 
 			c.Items[k].Quantity += i.Quantity
 			repeated = true
@@ -169,9 +109,15 @@ func (cc CartController) AddProduct(w http.ResponseWriter, r *http.Request, p ht
 		Remove:    false,
 		ReturnNew: true,
 	}
-	info, err := cc.session.DB("virtuloja-api").C("carts").Find(bson.M{"customerid": c.CustomerID}).Apply(change, &c)
-	fmt.Println(info)
-	fmt.Println(c.CustomerID)
+
+	_, err = cc.session.DB("virtuloja-api").C("carts").Find(bson.M{"customerid": c.CustomerID}).Apply(change, &c)
+	if err != nil {
+		log.Println(err.Error())
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	c.Sum = models.Sum(c)
 
 	// Add an Id
 	c.ID = bson.NewObjectId()
@@ -188,27 +134,52 @@ func (cc CartController) AddProduct(w http.ResponseWriter, r *http.Request, p ht
 	fmt.Fprintf(w, "%s", prj)
 }
 
-// RemoveProduct removes an existing product resource
-// func (pc CartController) RemoveProduct(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
+// Checkout retrieves an individual cart resource by ID
+func (cc CartController) Checkout(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
 
-// 	// Grab id
-// 	id := p.ByName("id")
+	// Grab id
+	customerID, err := strconv.Atoi(p.ByName("customerId"))
 
-// 	// Verify id is ObjectId, otherwise bail
-// 	if !bson.IsObjectIdHex(id) {
-// 		w.WriteHeader(404)
-// 		return
-// 	}
+	// Stub product
+	c := models.Cart{}
 
-// 	// Grab id
-// 	oid := bson.ObjectIdHex(id)
+	// Fetch product
+	if err := cc.session.DB("virtuloja-api").C("carts").Find(bson.M{"customerid": customerID}).One(&c); err != nil {
+		log.Println(err.Error())
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
 
-// 	// Remove product
-// 	if err := pc.session.DB("virtuloja-api").C("products").RemoveId(oid); err != nil {
-// 		w.WriteHeader(404)
-// 		return
-// 	}
+	change := mgo.Change{
+		Update:    bson.M{"$set": bson.M{"timeend": time.Now()}},
+		Upsert:    false,
+		Remove:    false,
+		ReturnNew: true,
+	}
+	_, err = cc.session.DB("virtuloja-api").C("carts").Find(bson.M{"customerid": c.CustomerID}).Apply(change, &c)
+	if err != nil {
+		log.Println(err.Error())
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
 
-// 	// Write status
-// 	w.WriteHeader(200)
-// }
+	c.Sum = models.Sum(c)
+
+	// Write the chart to history
+	cc.session.DB("virtuloja-api").C("customerHistory").Insert(c)
+
+	//
+	err = cc.session.DB("virtuloja-api").C("carts").Remove(bson.M{"customerid": c.CustomerID})
+	if err != nil {
+		log.Println(err.Error())
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
+
+	// Marshal provided interface into JSON structure
+	uj, _ := json.Marshal(c)
+
+	// Write content-type, statuscode, payload
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	fmt.Fprintf(w, "%s", uj)
+}

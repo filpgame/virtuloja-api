@@ -35,13 +35,16 @@ func main() {
 	cc := controllers.NewCartController(getSession())
 
 	// Create a new product
-	r.POST("/cart", cc.CreateCart)
+	r.POST("/checkin", cc.CreateCart)
+
+	// Create a new product
+	r.POST("/checkout/:customerId", cc.Checkout)
 
 	// Create a new product
 	r.POST("/cart/:customerId/addProduct", cc.AddProduct)
 
 	// Fire up the server
-	http.ListenAndServe(":8001", r)
+	http.ListenAndServe(":8000", r)
 }
 
 // getSession creates a new mongo session and panics if connection error occurs
