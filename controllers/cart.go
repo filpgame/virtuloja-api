@@ -70,6 +70,32 @@ func (cc CartController) AddProduct(w http.ResponseWriter, r *http.Request, p ht
 	// Populate the product data
 	json.NewDecoder(r.Body).Decode(&i)
 
+	var pp models.Product
+	err = cc.session.DB("virtuloja-api").C("products").Find(bson.M{"globalid": i.GlobalID}).One(&pp)
+	if err != nil {
+		log.Println(err.Error())
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	i.Value = pp.Value
+
+	// Stock validation
+	var st models.StockItem
+	if err := cc.session.DB("virtuloja-api").C("stock").Find(bson.M{"globalid": i.GlobalID}).One(&st); err != nil {
+		log.Println(err.Error())
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	if st.Quantity < i.Quantity {
+
+		msg := "There are no enough products " + pp.Description
+		log.Println(msg)
+		http.Error(w, msg, http.StatusInternalServerError)
+		return
+	}
+
 	var c models.Cart
 
 	err = cc.session.DB("virtuloja-api").C("carts").Find(bson.M{"customerid": customerID}).One(&c)
@@ -77,13 +103,6 @@ func (cc CartController) AddProduct(w http.ResponseWriter, r *http.Request, p ht
 		log.Println(err.Error())
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
-	}
-
-	if i.Value == 0 {
-
-		var pp models.Product
-		err = cc.session.DB("virtuloja-api").C("products").Find(bson.M{"globalid": i.GlobalID}).One(&pp)
-		i.Value = pp.Value
 	}
 
 	// Adicionar novos itens na lista
@@ -103,6 +122,7 @@ func (cc CartController) AddProduct(w http.ResponseWriter, r *http.Request, p ht
 		c.Items = append(c.Items, i)
 	}
 
+	// Update customer cart
 	change := mgo.Change{
 		Update:    bson.M{"$set": bson.M{"items": c.Items}},
 		Upsert:    false,
@@ -117,13 +137,38 @@ func (cc CartController) AddProduct(w http.ResponseWriter, r *http.Request, p ht
 		return
 	}
 
+	stockQuantityBefore := st.Quantity
+
+	// Update stock
+	change = mgo.Change{
+		Update:    bson.M{"$set": bson.M{"quantity": st.Quantity - i.Quantity}},
+		Upsert:    false,
+		Remove:    false,
+		ReturnNew: true,
+	}
+
+	_, err = cc.session.DB("virtuloja-api").C("stock").Find(bson.M{"globalid": i.GlobalID}).Apply(change, &st)
+	if err != nil {
+		log.Println(err.Error())
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	if st.Quantity < st.MinimumStock && stockQuantityBefore >= st.MinimumStock {
+
+		// Create low stock alert
+		var a models.Alert
+		a.ID = bson.NewObjectId()
+		a.Alert = "Low stock from product " + pp.Description
+		err = cc.session.DB("virtuloja-api").C("alert").Insert(a)
+		if err != nil {
+			log.Println(err.Error())
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+	}
+
 	c.Sum = models.Sum(c)
-
-	// Add an Id
-	c.ID = bson.NewObjectId()
-
-	// Write the product to mongo
-	//cc.session.DB("virtuloja-api").C("carts").Insert(c)
 
 	// Marshal provided interface into JSON structure
 	prj, _ := json.Marshal(c)
